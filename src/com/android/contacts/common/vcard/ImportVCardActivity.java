@@ -370,7 +370,11 @@ public class ImportVCardActivity extends Activity {
             } finally {
                 Log.i(LOG_TAG, "Finished caching vCard.");
                 mWakeLock.release();
-                unbindService(mConnection);
+                try {
+                    unbindService(mConnection);
+                } catch (Exception e) {
+                    Log.e(LOG_TAG, "Exception when unbinding service", e);
+                }
                 mProgressDialogForCachingVCard.dismiss();
                 mProgressDialogForCachingVCard = null;
                 finish();
