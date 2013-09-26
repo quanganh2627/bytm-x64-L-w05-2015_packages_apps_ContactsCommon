@@ -20,11 +20,15 @@ import android.app.ActionBar;
 import android.app.Activity;
 import android.app.LoaderManager.LoaderCallbacks;
 import android.content.AsyncTaskLoader;
+import android.content.ContentResolver;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.Loader;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
+import android.provider.ContactsContract.Groups;
+import android.provider.ContactsContract.Settings;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.MenuItem;
@@ -38,6 +42,7 @@ import com.android.contacts.common.R;
 import com.android.contacts.common.model.AccountTypeManager;
 import com.android.contacts.common.model.account.AccountType;
 import com.android.contacts.common.model.account.AccountWithDataSet;
+import com.android.contacts.common.model.account.GoogleAccountType;
 import com.google.common.collect.Lists;
 
 import java.util.ArrayList;
@@ -172,10 +177,85 @@ public class AccountFilterActivity extends Activity implements AdapterView.OnIte
                     CustomContactListFilterActivity.class);
             startActivityForResult(intent, SUBACTIVITY_CUSTOMIZE_FILTER);
         } else {
+            // try update groups and settings tables' 'visible' relevance column
+            updateVisibleColumn(filter);
+            //------------
             final Intent intent = new Intent();
             intent.putExtra(KEY_EXTRA_CONTACT_LIST_FILTER, filter);
             setResult(Activity.RESULT_OK, intent);
             finish();
+        }
+    }
+
+    private void updateVisibleColumn(ContactListFilter filter) {
+        ContentResolver resolver = this.getContentResolver();
+        ContentValues values = new ContentValues();
+        if (filter.filterType == ContactListFilter.FILTER_TYPE_ALL_ACCOUNTS) {
+            values.put(Groups.GROUP_VISIBLE, 1);
+            resolver.update(Groups.CONTENT_URI, values, null, null);
+            values.clear();
+            // if is google account do not share contacts not in 'My Contacts' and groups;
+            String where = Settings.ACCOUNT_TYPE + " = '" + GoogleAccountType.ACCOUNT_TYPE + "'";
+            values.put(Settings.UNGROUPED_VISIBLE, 0);
+            resolver.update(Settings.CONTENT_URI, values, where, null);
+            where = Settings.ACCOUNT_TYPE + " != '" + GoogleAccountType.ACCOUNT_TYPE + "'";
+            values.put(Settings.UNGROUPED_VISIBLE, 1);
+            resolver.update(Settings.CONTENT_URI, values, where, null);
+        } else {
+            // update groups table
+            String where = createWhere(true, true, filter.accountName, filter.accountType);
+            values.put(Groups.GROUP_VISIBLE, 1);
+            resolver.update(Groups.CONTENT_URI, values, where, null);
+            where = createWhere(true, false, filter.accountName, filter.accountType);
+            values.put(Groups.GROUP_VISIBLE, 0);
+            resolver.update(Groups.CONTENT_URI, values, where, null);
+            // update settings table
+            // if is google account do not share contacts not in 'My Contacts' and groups;
+            if (filter.accountType.equals(GoogleAccountType.ACCOUNT_TYPE)) {
+                values.clear();
+                values.put(Settings.UNGROUPED_VISIBLE, 0);
+                where = createWhere(false, true, filter.accountName, filter.accountType);
+                resolver.update(Settings.CONTENT_URI, values, where, null);
+            } else {
+                values.clear();
+                values.put(Settings.UNGROUPED_VISIBLE, 1);
+                where = createWhere(false, true, filter.accountName, filter.accountType);
+                resolver.update(Settings.CONTENT_URI, values, where, null);
+            }
+            values.clear();
+            values.put(Settings.UNGROUPED_VISIBLE, 0);
+            where = createWhere(false, false, filter.accountName, filter.accountType);
+            resolver.update(Settings.CONTENT_URI, values, where, null);
+        }
+    }
+
+   /**
+     *
+     *  @param groupOrSetting true is for groups table, false is for Settings table
+     *  @param isAccount true means condition equals the account
+     *  @param accountName
+     *  @param accountType
+     *  @return
+     */
+
+    private String createWhere(boolean groupOrSetting, boolean isAccount,
+            String accountName, String accountType) {
+        if (groupOrSetting) {
+            if (isAccount) {
+                return Groups.ACCOUNT_NAME + " = '" + accountName
+                        + "' AND " + Groups.ACCOUNT_TYPE + " = '" + accountType + "'";
+            } else {
+                return Groups.ACCOUNT_NAME + " != '" + accountName
+                        + "' AND " + Groups.ACCOUNT_TYPE + " != '" + accountType + "'";
+            }
+        } else {
+            if (isAccount) {
+                return Settings.ACCOUNT_NAME + " = '" + accountName
+                        + "' AND " + Settings.ACCOUNT_TYPE + " = '" + accountType + "'";
+            } else {
+                return Settings.ACCOUNT_NAME + " != '" + accountName
+                        + "' AND " + Settings.ACCOUNT_TYPE + " != '" + accountType + "'";
+            }
         }
     }
 
