@@ -725,7 +725,7 @@ public class ImportVCardActivity extends Activity {
                 }
                 return;
             }
-            for (File file : directory.listFiles()) {
+            for (File file : files) {
                 if (mCanceled) {
                     throw new CanceledException();
                 }
