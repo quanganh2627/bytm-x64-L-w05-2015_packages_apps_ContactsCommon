@@ -38,11 +38,14 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import com.android.contacts.common.R;
+import com.android.contacts.common.ContactsUtils;
 import com.android.contacts.common.editor.SelectAccountDialogFragment;
 import com.android.contacts.common.model.AccountTypeManager;
 import com.android.contacts.common.model.account.AccountWithDataSet;
 import com.android.contacts.common.util.AccountSelectionUtil;
 import com.android.contacts.common.util.AccountsListAdapter.AccountListFilter;
+import com.android.contacts.common.util.DualSimConstants;
+import com.android.contacts.common.util.SimUtils;
 import com.android.contacts.common.vcard.ExportVCardActivity;
 import com.android.contacts.common.vcard.VCardCommonArguments;
 
@@ -97,7 +100,26 @@ public class ImportExportDialogFragment extends DialogFragment
             }
         };
 
-        if (TelephonyManager.getDefault().hasIccCard()
+        if (ContactsUtils.isDualSimSupported()) { // ref
+            boolean allowSimImport = res.getBoolean(R.bool.config_allow_sim_import);
+            boolean allowSimExport = res.getBoolean(R.bool.config_allow_sim_export);
+            if (SimUtils.isSimAccessible(getActivity(), DualSimConstants.DSDS_SLOT_1_ID)) {
+                if (allowSimImport) {
+                    adapter.add(R.string.import_from_sim_1);
+                }
+                if (contactsAreAvailable && allowSimExport) {
+                    adapter.add(R.string.export_to_sim_1);
+                }
+            }
+            if (SimUtils.isSimAccessible(getActivity(), DualSimConstants.DSDS_SLOT_2_ID)) {
+                if (allowSimImport) {
+                    adapter.add(R.string.import_from_sim_2);
+                }
+                if (contactsAreAvailable && allowSimExport) {
+                    adapter.add(R.string.export_to_sim_2);
+                }
+            }
+        } else if (TelephonyManager.getDefault().hasIccCard()
                 && res.getBoolean(R.bool.config_allow_sim_import)) {
             adapter.add(R.string.import_from_sim);
         }
@@ -123,8 +145,21 @@ public class ImportExportDialogFragment extends DialogFragment
                 final int resId = adapter.getItem(which);
                 switch (resId) {
                     case R.string.import_from_sim:
+                    case R.string.import_from_sim_1:
+                    case R.string.import_from_sim_2:
                     case R.string.import_from_sdcard: {
                         dismissDialog = handleImportRequest(resId);
+                        break;
+                    }
+                    case R.string.export_to_sim_1:
+                    case R.string.export_to_sim_2: { // ref
+                        dismissDialog = true;
+                        Intent exportIntent = new Intent();
+                        exportIntent.setClassName("com.android.contacts", "com.android.contacts.ExportSimContactsActivity");
+                        if (resId == R.string.export_to_sim_2) {
+                            exportIntent.putExtra("export_to_sim_b", true);
+                        }
+                        getActivity().startActivity(exportIntent);
                         break;
                     }
                     case R.string.export_to_sdcard: {

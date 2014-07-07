@@ -18,6 +18,8 @@ package com.android.contacts.common.list;
 
 import android.content.Context;
 import android.content.res.ColorStateList;
+import android.content.res.Resources;
+import android.content.res.Resources.Theme;
 import android.content.res.TypedArray;
 import android.database.CharArrayBuffer;
 import android.database.Cursor;
@@ -29,6 +31,7 @@ import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.provider.ContactsContract;
 import android.provider.ContactsContract.Contacts;
+import android.telephony.PhoneNumberUtils;
 import android.text.Spannable;
 import android.text.SpannableString;
 import android.text.TextUtils;
@@ -45,7 +48,8 @@ import android.widget.ImageView;
 import android.widget.ImageView.ScaleType;
 import android.widget.QuickContactBadge;
 import android.widget.TextView;
-
+//import com.android.contacts.util.ThemeUtils;
+import com.android.contacts.common.ContactsUtils;
 import com.android.contacts.common.ContactPresenceIconUtil;
 import com.android.contacts.common.ContactStatusUtil;
 import com.android.contacts.common.R;
@@ -77,11 +81,15 @@ import java.util.regex.Pattern;
 public class ContactListItemView extends ViewGroup
         implements SelectionBoundsAdjuster {
 
+    private boolean mIsDualSimSupported = false;
+
     // Style values for layout and appearance
     // The initialized values are defaults if none is provided through xml.
     private int mPreferredHeight = 0;
+    private int mVerticalDividerMargin = 0;
     private int mGapBetweenImageAndText = 0;
     private int mGapBetweenLabelAndData = 0;
+    private int mCallButtonPadding = 0;
     private int mPresenceIconMargin = 4;
     private int mPresenceIconSize = 16;
     private int mHeaderTextColor = Color.BLACK;
@@ -151,6 +159,10 @@ public class ContactListItemView extends ViewGroup
     }
 
     private PhotoPosition mPhotoPosition = getDefaultPhotoPosition(false /* normal/non opposite */);
+    // Vertical divider between the call icon and the text.
+    private boolean mVerticalDividerVisible;
+    private Drawable mVerticalDividerDrawable;
+    private int mVerticalDividerWidth = 1;
 
     // Header layout data
     private boolean mHeaderVisible;
@@ -164,6 +176,8 @@ public class ContactListItemView extends ViewGroup
     private ImageView mPhotoView;
     private TextView mNameTextView;
     private TextView mPhoneticNameTextView;
+    private ImageView mCallButtonAlternative;
+    private DontPressWithParentImageView mCallButton;
     private TextView mLabelView;
     private TextView mDataView;
     private TextView mSnippetView;
@@ -173,6 +187,9 @@ public class ContactListItemView extends ViewGroup
 
     private ColorStateList mSecondaryTextColor;
 
+
+
+    private boolean mDataViewHighlightEnabled = false;
 
 
     private int mDefaultPhotoViewSize = 0;
@@ -214,6 +231,7 @@ public class ContactListItemView extends ViewGroup
     // same row.
     private int mLabelAndDataViewMaxHeight;
 
+    private OnClickListener mCallButtonClickListener;
     // TODO: some TextView fields are using CharArrayBuffer while some are not. Determine which is
     // more efficient for each case or in general, and simplify the whole implementation.
     // Note: if we're sure MARQUEE will be used every time, there's no reason to use
@@ -231,6 +249,27 @@ public class ContactListItemView extends ViewGroup
     private final TextHighlighter mTextHighlighter;
     private CharSequence mUnknownNameText;
 
+    /**
+     * Special class to allow the parent to be pressed without being pressed itself.
+     * This way the line of a tab can be pressed, but the image itself is not.
+     */
+    // TODO: understand this
+    private static class DontPressWithParentImageView extends ImageView {
+
+        public DontPressWithParentImageView(Context context, AttributeSet attrs) {
+            super(context, attrs);
+        }
+
+        @Override
+        public void setPressed(boolean pressed) {
+            // If the parent is pressed, do not set to pressed.
+            if (pressed && ((View) getParent()).isPressed()) {
+                return;
+            }
+            super.setPressed(pressed);
+        }
+    }
+
     public ContactListItemView(Context context) {
         super(context);
         mContext = context;
@@ -241,6 +280,8 @@ public class ContactListItemView extends ViewGroup
     public ContactListItemView(Context context, AttributeSet attrs) {
         super(context, attrs);
         mContext = context;
+        mIsDualSimSupported = ContactsUtils.isDualSimSupported();
+        Resources r = context.getResources();
 
         // Read all style values
         TypedArray a = getContext().obtainStyledAttributes(attrs, R.styleable.ContactListItemView);
@@ -250,6 +291,9 @@ public class ContactListItemView extends ViewGroup
                 R.styleable.ContactListItemView_activated_background);
         mHorizontalDividerDrawable = a.getDrawable(
                 R.styleable.ContactListItemView_list_item_divider);
+        mVerticalDividerMargin = r.getDimensionPixelOffset(
+                R.dimen.contact_tile_call_action_inner_margin_x2);
+                //R.dimen.call_log_inner_margin_x2);
 
         mGapBetweenImageAndText = a.getDimensionPixelOffset(
                 R.styleable.ContactListItemView_list_item_gap_between_image_and_text,
@@ -257,6 +301,9 @@ public class ContactListItemView extends ViewGroup
         mGapBetweenLabelAndData = a.getDimensionPixelOffset(
                 R.styleable.ContactListItemView_list_item_gap_between_label_and_data,
                 mGapBetweenLabelAndData);
+        mCallButtonPadding = r.getDimensionPixelOffset(
+                R.dimen.contact_tile_call_action_inner_margin);
+                //R.dimen.call_log_inner_margin);
         mPresenceIconMargin = a.getDimensionPixelOffset(
                 R.styleable.ContactListItemView_list_item_presence_icon_margin,
                 mPresenceIconMargin);
@@ -320,6 +367,13 @@ public class ContactListItemView extends ViewGroup
         mNumberHighlightSequence = new ArrayList<HighlightSequence>();
     }
 
+    /**
+     * Installs a call button listener.
+     */
+    public void setOnCallButtonClickListener(OnClickListener callButtonClickListener) {
+        mCallButtonClickListener = callButtonClickListener;
+    }
+
     public void setUnknownNameText(CharSequence unknownNameText) {
         mUnknownNameText = unknownNameText;
     }
@@ -350,14 +404,30 @@ public class ContactListItemView extends ViewGroup
 
         ensurePhotoViewSize();
 
+        int callButtonWidth = 0;
+        if (isVisible(mCallButton)) {
+            mCallButton.measure(MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED),
+                    MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED));
+            callButtonWidth = mCallButton.getMeasuredWidth();
+        }
+        boolean hasCallButtonAlternative = isVisible(mCallButtonAlternative);
+        int callButtonAlternativeWidth = 0;
+        if (hasCallButtonAlternative) {
+            mCallButtonAlternative.measure(MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED),
+                    MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED));
+            callButtonAlternativeWidth = mCallButtonAlternative.getMeasuredWidth();
+        }
+
         // Width each TextView is able to use.
         final int effectiveWidth;
         // All the other Views will honor the photo, so available width for them may be shrunk.
         if (mPhotoViewWidth > 0 || mKeepHorizontalPaddingForPhotoView) {
             effectiveWidth = specWidth - getPaddingLeft() - getPaddingRight()
+                    - (callButtonWidth + callButtonAlternativeWidth)
                     - (mPhotoViewWidth + mGapBetweenImageAndText);
         } else {
-            effectiveWidth = specWidth - getPaddingLeft() - getPaddingRight();
+            effectiveWidth = specWidth - getPaddingLeft() - getPaddingRight()
+                    - (callButtonWidth + callButtonAlternativeWidth);
         }
 
         // Go over all visible text views and measure actual width of each of them.
@@ -382,37 +452,45 @@ public class ContactListItemView extends ViewGroup
             mPhoneticNameTextViewHeight = mPhoneticNameTextView.getMeasuredHeight();
         }
 
+        boolean hasLabelView = isVisible(mLabelView);
+        boolean hasDataView = isVisible(mDataView);
+
         // If both data (phone number/email address) and label (type like "MOBILE") are quite long,
         // we should ellipsize both using appropriate ratio.
         final int dataWidth;
         final int labelWidth;
-        if (isVisible(mDataView)) {
-            if (isVisible(mLabelView)) {
-                final int totalWidth = effectiveWidth - mGapBetweenLabelAndData;
-                dataWidth = ((totalWidth * mDataViewWidthWeight)
-                        / (mDataViewWidthWeight + mLabelViewWidthWeight));
-                labelWidth = ((totalWidth * mLabelViewWidthWeight) /
-                        (mDataViewWidthWeight + mLabelViewWidthWeight));
+        if (hasDataView) {
+            if (hasLabelView) {
+                if (hasCallButtonAlternative) {
+                    dataWidth = effectiveWidth;
+                    labelWidth = effectiveWidth;
+                } else {
+                    final int totalWidth = effectiveWidth - mGapBetweenLabelAndData;
+                    dataWidth = ((totalWidth * mDataViewWidthWeight)
+                            / (mDataViewWidthWeight + mLabelViewWidthWeight));
+                    labelWidth = ((totalWidth * mLabelViewWidthWeight) /
+                            (mDataViewWidthWeight + mLabelViewWidthWeight));
+                }
             } else {
                 dataWidth = effectiveWidth;
                 labelWidth = 0;
             }
         } else {
             dataWidth = 0;
-            if (isVisible(mLabelView)) {
+            if (hasLabelView) {
                 labelWidth = effectiveWidth;
             } else {
                 labelWidth = 0;
             }
         }
 
-        if (isVisible(mDataView)) {
+        if (hasDataView) {
             mDataView.measure(MeasureSpec.makeMeasureSpec(dataWidth, MeasureSpec.EXACTLY),
                     MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED));
             mDataViewHeight = mDataView.getMeasuredHeight();
         }
 
-        if (isVisible(mLabelView)) {
+        if (hasLabelView) {
             // For performance reason we don't want AT_MOST usually, but when the picture is
             // on right, we need to use it anyway because mDataView is next to mLabelView.
             final int mode = (mPhotoPosition == PhotoPosition.LEFT
@@ -455,8 +533,13 @@ public class ContactListItemView extends ViewGroup
 
         // Calculate height including padding.
         int height = (mNameTextViewHeight + mPhoneticNameTextViewHeight +
-                mLabelAndDataViewMaxHeight +
                 mSnippetTextViewHeight + mStatusTextViewHeight);
+
+        if (hasLabelView && hasDataView && hasCallButtonAlternative) {
+            height += mLabelAndDataViewMaxHeight * 2;
+        } else {
+            height += mLabelAndDataViewMaxHeight;
+        }
 
         // Make sure the height is at least as high as the photo
         height = Math.max(height, mPhotoViewHeight + getPaddingBottom() + getPaddingTop());
@@ -537,6 +620,7 @@ public class ContactListItemView extends ViewGroup
             mActivatedBackgroundDrawable.setBounds(mBoundsWithoutHeader);
         }
 
+        boolean hasCallButtonAlternative = isVisible(mCallButtonAlternative);
         final View photoView = mQuickContact != null ? mQuickContact : mPhotoView;
         if (mPhotoPosition == PhotoPosition.LEFT) {
             // Photo is the left most view. All the other Views should on the right of the photo.
@@ -564,18 +648,40 @@ public class ContactListItemView extends ViewGroup
                         rightBound,
                         photoTop + mPhotoViewHeight);
                 rightBound -= (mPhotoViewWidth + mGapBetweenImageAndText);
+                //rightBound -= mPhotoViewWidth; //jb
+                if (!hasCallButtonAlternative) {
+                    rightBound -= mGapBetweenImageAndText;
+                }				
             } else if (mKeepHorizontalPaddingForPhotoView) {
                 // Draw nothing but keep the padding.
                 rightBound -= (mPhotoViewWidth + mGapBetweenImageAndText);
+                /* jb
+                rightBound -= mPhotoViewWidth;
+                if (!hasCallButtonAlternative) {
+                    rightBound -= mGapBetweenImageAndText;
+                }
+				*/
             }
 
             // Add indent between left-most padding and texts.
             leftBound += mTextIndent;
         }
 
+        // Layout the call button.
+        rightBound = layoutRightSide(height, topBound, bottomBound, rightBound);
+
+        boolean hasLabelView = isVisible(mLabelView);
+        boolean hasDataView = isVisible(mDataView);
+
         // Center text vertically
-        final int totalTextHeight = mNameTextViewHeight + mPhoneticNameTextViewHeight +
-                mLabelAndDataViewMaxHeight + mSnippetTextViewHeight + mStatusTextViewHeight;
+        final int totalTextHeight;
+        if (hasLabelView && hasDataView && hasCallButtonAlternative) {
+            totalTextHeight = mNameTextViewHeight + mPhoneticNameTextViewHeight
+                    + mLabelAndDataViewMaxHeight * 2 + mSnippetTextViewHeight + mStatusTextViewHeight;
+        } else {
+            totalTextHeight = mNameTextViewHeight + mPhoneticNameTextViewHeight
+                    + mLabelAndDataViewMaxHeight + mSnippetTextViewHeight + mStatusTextViewHeight;
+        }
         int textTopBound = (bottomBound + topBound - totalTextHeight) / 2;
 
         // Layout all text view and presence icon
@@ -642,8 +748,14 @@ public class ContactListItemView extends ViewGroup
         }
 
         // Label and Data align bottom.
-        if (isVisible(mLabelView)) {
-            if (mPhotoPosition == PhotoPosition.LEFT) {
+        if (hasLabelView) {
+            if (hasCallButtonAlternative) {
+                mLabelView.setGravity(Gravity.LEFT);
+                mLabelView.layout(leftBound,
+                        textTopBound + mLabelAndDataViewMaxHeight - mLabelViewHeight,
+                        rightBound,
+                        textTopBound + mLabelAndDataViewMaxHeight);
+            } else if (mPhotoPosition == PhotoPosition.LEFT) {
                 // When photo is on left, label is placed on the right edge of the list item.
                 mLabelView.layout(rightBound - mLabelView.getMeasuredWidth(),
                         textTopBound + mLabelAndDataViewMaxHeight - mLabelViewHeight,
@@ -661,13 +773,16 @@ public class ContactListItemView extends ViewGroup
             }
         }
 
-        if (isVisible(mDataView)) {
+        if (hasDataView) {
+            if (hasLabelView && hasCallButtonAlternative) {
+                textTopBound += mLabelAndDataViewMaxHeight;
+            }
             mDataView.layout(dataLeftBound,
                     textTopBound + mLabelAndDataViewMaxHeight - mDataViewHeight,
                     rightBound,
                     textTopBound + mLabelAndDataViewMaxHeight);
         }
-        if (isVisible(mLabelView) || isVisible(mDataView)) {
+        if (hasLabelView || hasDataView) {
             textTopBound += mLabelAndDataViewMaxHeight;
         }
 
@@ -677,6 +792,44 @@ public class ContactListItemView extends ViewGroup
                     rightBound,
                     textTopBound + mSnippetTextViewHeight);
         }
+    }
+
+    /**
+     * Performs layout of the right side of the view
+     *
+     * @return new right boundary
+     */
+    protected int layoutRightSide(int height, int topBound, int bottomBound, int rightBound) {
+        // Put call button and vertical divider
+        if (isVisible(mCallButton)) {
+            int buttonWidth = mCallButton.getMeasuredWidth();
+            rightBound -= buttonWidth;
+            mCallButton.layout(
+                    rightBound,
+                    topBound,
+                    rightBound + buttonWidth,
+                    height - mHorizontalDividerHeight);
+            mVerticalDividerVisible = true;
+            ensureVerticalDivider();
+            rightBound -= mVerticalDividerWidth;
+            mVerticalDividerDrawable.setBounds(
+                    rightBound,
+                    topBound + mVerticalDividerMargin,
+                    rightBound + mVerticalDividerWidth,
+                    height - mVerticalDividerMargin);
+            if (isVisible(mCallButtonAlternative)) {
+                rightBound -= buttonWidth;
+                mCallButtonAlternative.layout(
+                        rightBound,
+                        topBound,
+                        rightBound + buttonWidth,
+                        height - mHorizontalDividerHeight);
+            }
+        } else {
+            mVerticalDividerVisible = false;
+        }
+
+        return rightBound;
     }
 
     @Override
@@ -689,6 +842,16 @@ public class ContactListItemView extends ViewGroup
 
     protected boolean isVisible(View view) {
         return view != null && view.getVisibility() == View.VISIBLE;
+    }
+
+    /**
+     * Loads the drawable for the vertical divider if it has not yet been loaded.
+     */
+    private void ensureVerticalDivider() {
+        if (mVerticalDividerDrawable == null) {
+            mVerticalDividerDrawable = mContext.getResources().getDrawable(
+                    R.drawable.ic_divider_dashed_holo_dark);
+        }
     }
 
     /**
@@ -758,6 +921,9 @@ public class ContactListItemView extends ViewGroup
         }
         if (mHorizontalDividerVisible) {
             mHorizontalDividerDrawable.draw(canvas);
+        }
+        if (mVerticalDividerVisible) {
+            mVerticalDividerDrawable.draw(canvas);
         }
 
         super.dispatchDraw(canvas);
@@ -871,6 +1037,10 @@ public class ContactListItemView extends ViewGroup
         }
     }
 
+    public void setDataViewHighlightEnabled(boolean enabled) {
+        mDataViewHighlightEnabled = enabled;
+    }
+
     /**
      * Sets a word prefix that will be highlighted if encountered in fields like
      * name and search snippet. This will disable the mask highlighting for names.
@@ -926,6 +1096,74 @@ public class ContactListItemView extends ViewGroup
             addView(mNameTextView);
         }
         return mNameTextView;
+    }
+
+    private void addCallButtonAlternative() {
+        if (mCallButtonAlternative == null) {
+            int src = R.drawable.ic_ab_dialer_holo_dark_1;
+            mCallButtonAlternative = new ImageView(mContext, null);
+            mCallButtonAlternative.setImageResource(src);
+            mCallButtonAlternative.setPadding(mCallButtonPadding, 0, mCallButtonPadding, 0);
+            mCallButtonAlternative.setScaleType(ScaleType.CENTER);
+            addView(mCallButtonAlternative);
+        }
+    }
+
+    private void removeCallButtonAlternative() {
+        if (mCallButtonAlternative != null) {
+            removeView(mCallButtonAlternative);
+            mCallButtonAlternative = null;
+        }
+    }
+
+    public void setCallButtonEnabled(boolean enabled) {
+        if (isVisible(mCallButton)) {
+            mCallButton.setEnabled(enabled);
+        }
+    }
+
+    public void setAlternativeCallButtonEnabled(boolean enabled) {
+        if (isVisible(mCallButtonAlternative)) {
+            mCallButtonAlternative.setEnabled(enabled);
+        }
+    }
+
+    /**
+     * Adds a call button using the supplied arguments as an id and tag.
+     */
+    public void showCallButton(int id, int tag) {
+        if (mCallButton == null) {
+            int src = R.drawable.call_background;
+            int background = android.R.drawable.sym_action_call;
+            if (mIsDualSimSupported) {
+                src = R.drawable.ic_ab_dialer_holo_dark_2;
+//ref no find ThemeUtils
+//                background = ThemeUtils.getSelectableItemBackground(getContext().getTheme());
+            }
+            mCallButton = new DontPressWithParentImageView(mContext, null);
+            mCallButton.setId(id);
+            mCallButton.setOnClickListener(mCallButtonClickListener);
+            mCallButton.setBackgroundResource(background);
+            mCallButton.setImageResource(src);
+            mCallButton.setPadding(mCallButtonPadding, 0, mCallButtonPadding, 0);
+            mCallButton.setScaleType(ScaleType.CENTER);
+            addView(mCallButton);
+        }
+
+        if (mIsDualSimSupported) {
+            addCallButtonAlternative();
+        }
+        mCallButton.setTag(tag);
+        mCallButton.setVisibility(View.VISIBLE);
+    }
+
+    public void hideCallButton() {
+        if (mCallButton != null) {
+            mCallButton.setVisibility(View.GONE);
+        }
+        if (mIsDualSimSupported) {
+            removeCallButtonAlternative();
+        }
     }
 
     /**
@@ -1040,6 +1278,18 @@ public class ContactListItemView extends ViewGroup
             // We have a phone number as "mDataView" so make it always LTR and VIEW_START
             mDataView.setTextDirection(View.TEXT_DIRECTION_LTR);
             mDataView.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
+        }
+    }
+
+    public void setData(CharSequence data) { //ref
+        if (TextUtils.isEmpty(data)) {
+            if (mDataView != null) {
+                mDataView.setVisibility(View.GONE);
+            }
+        } else {
+            getDataView();
+            setMarqueeText(mDataView, data);
+            mDataView.setVisibility(VISIBLE);
         }
     }
 
@@ -1296,6 +1546,19 @@ public class ContactListItemView extends ViewGroup
         }
 
         String snippet = cursor.getString(summarySnippetColumnIndex);
+        if (snippet != null) {
+            StringBuilder sb = new StringBuilder();
+            final int length = snippet.length();
+            for (int i = 0; i < length; i++) {
+                char c = snippet.charAt(i);
+                if (c != DefaultContactListAdapter.SNIPPET_START_MATCH &&
+                        c != DefaultContactListAdapter.SNIPPET_END_MATCH &&
+                        c != ' ') {
+                    sb.append(c);
+                }
+            }
+            snippet = sb.toString();
+        }
 
         // Do client side snippeting if provider didn't do it
         final Bundle extras = cursor.getExtras();
@@ -1305,10 +1568,10 @@ public class ContactListItemView extends ViewGroup
 
             String displayName = null;
             int displayNameIndex = cursor.getColumnIndex(Contacts.DISPLAY_NAME);
+            snippet = trimSpaceInNumber(snippet);
             if (displayNameIndex >= 0) {
                 displayName = cursor.getString(displayNameIndex);
             }
-
             snippet = updateSnippet(snippet, query, displayName);
 
         } else {
@@ -1346,6 +1609,24 @@ public class ContactListItemView extends ViewGroup
 
         setSnippet(snippet);
     }
+
+    private String trimSpaceInNumber(String phoneNumber) {
+         if (phoneNumber == null) return null;
+         int len = phoneNumber.length();
+         StringBuilder sb = new StringBuilder();
+         for (int i = 0; i < len; i++) {
+             char temp = phoneNumber.charAt(i);
+             if (temp == ' ') continue;
+             if (PhoneNumberUtils.isDialable(temp) ||
+                   temp == DefaultContactListAdapter.SNIPPET_START_MATCH) {
+                 sb.append(temp);
+             } else {
+                 return phoneNumber;
+             }
+         }
+         return sb.toString();
+     }
+
 
     /**
      * Used for deferred snippets from the database. The contents come back as large strings which

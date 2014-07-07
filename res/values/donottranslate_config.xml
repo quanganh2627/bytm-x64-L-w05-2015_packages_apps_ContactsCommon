@@ -84,4 +84,8 @@
     <!-- Flag indicating whether Contacts app is allowed to share contacts with devices outside -->
     <bool name="config_allow_share_visible_contacts">true</bool>
 
+    <!-- If true, enable the "export contacts to SIM" feature if the device
+         has an appropriate SIM or ICC card. ref -->
+    <bool name="config_allow_sim_export">true</bool>
+
 </resources>

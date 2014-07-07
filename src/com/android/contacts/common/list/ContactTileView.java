@@ -18,19 +18,23 @@ package com.android.contacts.common.list;
 import android.content.Context;
 import android.graphics.Rect;
 import android.net.Uri;
+import android.telephony.PhoneNumberUtils;
 import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.View;
 import android.widget.FrameLayout;
+import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.QuickContactBadge;
 import android.widget.TextView;
-
+import com.android.contacts.common.ContactsUtils;
 import com.android.contacts.common.ContactPhotoManager;
 import com.android.contacts.common.ContactPhotoManager.DefaultImageRequest;
 import com.android.contacts.common.MoreContactUtils;
 import com.android.contacts.common.R;
+import com.android.contacts.common.util.SimUtils;
+
 
 /**
  * A ContactTile displays a contact's picture and name
@@ -46,9 +50,13 @@ public abstract class ContactTileView extends FrameLayout {
     private TextView mPhoneLabel;
     private TextView mPhoneNumber;
     private ContactPhotoManager mPhotoManager = null;
-    private View mPushState;
+    public View mPushState;
     private View mHorizontalDivider;
-    protected Listener mListener;
+    public Listener mListener;
+    private boolean mEnablePrimary2Action;
+    public ImageView mPrimary1Button;
+    public ImageButton mPrimary2Button;
+    private View mVerticalDivider;
 
     public ContactTileView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -60,6 +68,9 @@ public abstract class ContactTileView extends FrameLayout {
         mName = (TextView) findViewById(R.id.contact_tile_name);
 
         mQuickContact = (QuickContactBadge) findViewById(R.id.contact_tile_quick);
+        mPrimary1Button = (ImageView) findViewById(R.id.contact_tile_primary_1_button);
+        mPrimary2Button = (ImageButton) findViewById(R.id.contact_tile_primary_2_button);
+        mVerticalDivider = findViewById(R.id.contact_tile_vertical_divider);
         mPhoto = (ImageView) findViewById(R.id.contact_tile_image);
         mStatus = (TextView) findViewById(R.id.contact_tile_status);
         mPhoneLabel = (TextView) findViewById(R.id.contact_tile_phone_type);
@@ -67,8 +78,26 @@ public abstract class ContactTileView extends FrameLayout {
         mPushState = findViewById(R.id.contact_tile_push_state);
         mHorizontalDivider = findViewById(R.id.contact_tile_horizontal_divider);
 
+        if (!ContactsUtils.isDualSimSupported()) {
+            if (mPrimary1Button != null) {
+                mPrimary1Button.setVisibility(View.GONE);
+                mPrimary1Button = null;
+            }
+            if (mPrimary2Button != null) {
+                mPrimary2Button.setVisibility(View.GONE);
+                mPrimary2Button = null;
+            }
+            if (mVerticalDivider != null) {
+                mVerticalDivider.setVisibility(View.GONE);
+                mVerticalDivider = null;
+            }
+        }
+
         OnClickListener listener = createClickListener();
         setOnClickListener(listener);
+        if (mPrimary2Button != null) {
+            mPrimary2Button.setOnClickListener(createClickListener2());
+        }
     }
 
     protected OnClickListener createClickListener() {
@@ -77,6 +106,18 @@ public abstract class ContactTileView extends FrameLayout {
             public void onClick(View v) {
                 if (mListener == null) return;
                 mListener.onContactSelected(
+                        getLookupUri(),
+                        MoreContactUtils.getTargetRectFromView(mContext, ContactTileView.this));
+            }
+        };
+    }
+
+    protected OnClickListener createClickListener2() {
+        return new OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (mListener == null) return;
+                mListener.onContactSelected2(
                         getLookupUri(),
                         MoreContactUtils.getTargetRectFromView(mContext, ContactTileView.this));
             }
@@ -109,7 +150,7 @@ public abstract class ContactTileView extends FrameLayout {
             }
 
             if (mPhoneLabel != null) {
-                if (TextUtils.isEmpty(entry.phoneLabel)) {
+                if (TextUtils.isEmpty(entry.phoneLabel) || PhoneNumberUtils.isUriNumber(entry.phoneNumber)) { //ref
                     mPhoneLabel.setVisibility(View.GONE);
                 } else {
                     mPhoneLabel.setVisibility(View.VISIBLE);
@@ -123,6 +164,7 @@ public abstract class ContactTileView extends FrameLayout {
             }
 
             setVisibility(View.VISIBLE);
+            updateActionButtonsState(entry.phoneNumber);
 
             if (mPhotoManager != null) {
                 DefaultImageRequest request = getDefaultImageRequest(entry.name, entry.lookupKey);
@@ -153,8 +195,83 @@ public abstract class ContactTileView extends FrameLayout {
         }
     }
 
+    protected void updateActionButtonsState(String phoneNumber) {
+        if (!PhoneNumberUtils.isUriNumber(phoneNumber) && mEnablePrimary2Action) {
+            if (mPrimary1Button != null) {
+                mPrimary1Button.setVisibility(View.VISIBLE);
+                if (SimUtils.isSim1Ready(getContext())) {
+                    mPrimary1Button.setEnabled(true);
+                } else {
+                    mPrimary1Button.setEnabled(false);
+                }
+            }
+            if (mPrimary2Button != null) {
+                mPrimary2Button.setVisibility(View.VISIBLE);
+                if (SimUtils.isSim2Ready(getContext())) {
+                    mPrimary2Button.setEnabled(true);
+                } else {
+                    mPrimary2Button.setEnabled(false);
+                }
+            }
+            if (mVerticalDivider != null) {
+                mVerticalDivider.setVisibility(View.VISIBLE);
+            }
+        } else {
+            if (mPrimary1Button != null) {
+                mPrimary1Button.setVisibility(View.GONE);
+            }
+            if (mPrimary2Button != null) {
+                mPrimary2Button.setVisibility(View.GONE);
+            }
+            if (mVerticalDivider != null) {
+                mVerticalDivider.setVisibility(View.GONE);
+            }
+        }
+    }
+
+    public void setName(CharSequence name) {
+        mName.setText(name);
+    }
+
+    public void setPhoneLabel(CharSequence phoneLabel) {
+        if (mPhoneLabel != null) {
+            mPhoneLabel.setText(phoneLabel);
+        }
+    }
+
+    public void setPhoneNumber(CharSequence phoneNumber) {
+        if (mPhoneNumber != null) {
+            mPhoneNumber.setText(phoneNumber);
+        }
+    }
+// 4.4.4 remove 
+/*    public void setPhoto(Uri photoUri, Uri lookupUri) {
+        mLookupUri = lookupUri;
+
+        if (mPhotoManager != null) {
+            if (mPhoto != null) {
+                mPhotoManager.loadPhoto(mPhoto, photoUri, getApproximateImageSize(),
+                        isDarkTheme());
+
+                if (mQuickContact != null) {
+                    mQuickContact.assignContactUri(mLookupUri);
+                }
+            } else if (mQuickContact != null) {
+                mQuickContact.assignContactUri(mLookupUri);
+                mPhotoManager.loadPhoto(mQuickContact, photoUri,
+                        getApproximateImageSize(), isDarkTheme());
+            }
+        } else {
+            Log.w(TAG, "contactPhotoManager not set");
+        }
+    }
+*/
     public void setListener(Listener listener) {
         mListener = listener;
+    }
+
+    public void setEnablePrimary2Action(boolean enable) {
+        mEnablePrimary2Action = enable;
     }
 
     public void setHorizontalDividerVisibility(int visibility) {
@@ -215,9 +332,17 @@ public abstract class ContactTileView extends FrameLayout {
          */
         void onContactSelected(Uri contactLookupUri, Rect viewRect);
         /**
+         * Notification that the contact was selected, action on sim 2.
+         */
+        void onContactSelected2(Uri contactLookupUri, Rect viewRect);
+        /**
          * Notification that the specified number is to be called.
          */
         void onCallNumberDirectly(String phoneNumber);
+        /**
+         * Notification that the specified number is to be called by sim 2.
+         */
+        void onCallNumberDirectly2(String phoneNumber);
         /**
          * @return The width of each tile. This doesn't have to be a precise number (e.g. paddings
          *         can be ignored), but is used to load the correct picture size from the database

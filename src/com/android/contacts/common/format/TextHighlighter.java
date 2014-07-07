@@ -24,6 +24,11 @@ import android.text.style.StyleSpan;
 import android.widget.TextView;
 
 import com.google.common.base.Preconditions;
+import com.android.contacts.common.util.ContactLocaleUtils;
+import com.android.contacts.common.util.ContactLocaleUtils.LookupKey;
+import com.android.contacts.common.util.HanziToPinyin.Token;
+
+import java.util.ArrayList;
 
 /**
  * Highlights the text in a text field.
@@ -93,6 +98,112 @@ public class TextHighlighter {
             return result;
         } else {
             return text;
+        }
+    }
+    //refdsds
+    public CharSequence applyDigitalNameFilter(CharSequence name, String filter) {
+        ArrayList<LookupKey> keys = ContactLocaleUtils.getIntance().getNameLookupKeys(
+                name.toString());
+        if (keys != null && !keys.isEmpty() && filter != null) {
+            int keySize = keys.size();
+            int filterLength = filter.length();
+
+            int start = -1;
+            int end = -1;
+
+            // Compare the whole string
+            int i = 0;
+            while (i < keySize && (start == -1 || end == -1)) {
+                // Seek first filter character
+                while (i < keySize && keys.get(i).digits.charAt(0) != filter.charAt(0)) {
+                    i++;
+                }
+
+                if (i >= keySize) {
+                    break;
+                }
+
+                int s = i;
+
+                int j = 0;
+                while (i < keySize) {
+                    LookupKey key = keys.get(i);
+                    if (key.digits.charAt(0) != ' ') {
+                        int digitsLength = key.digits.length();
+                        int k = 0;
+                        while (k < digitsLength && j < filterLength &&
+                                key.digits.charAt(k) == filter.charAt(j)) {
+                            j++; k++;
+                        }
+                        if (j == filterLength) {
+                            start = keys.get(s).position;
+                            if (key.type == Token.LATIN) {
+                                end = key.position + k;
+                            } else {
+                                int e = i + 1;
+                                end = (e == keySize) ? name.length() : keys.get(e).position;
+                            }
+                            break;
+                        } else if (k != digitsLength) {
+                            i = s + 1;
+                            break;
+                        }
+                    }
+                    i++;
+                }
+            }
+
+            // Compare initial characters only
+            i = 0;
+            while (i < keySize && (start == -1 || end == -1)) {
+                // Seek first filter character
+                while (i < keySize && keys.get(i).digits.charAt(0) != filter.charAt(0)) {
+                    i++;
+                }
+
+                if (i >= keySize) {
+                    break;
+                }
+
+                int s = i;
+
+                int j = 0;
+                while (i < keySize && j < filterLength) {
+                    char c = keys.get(i).digits.charAt(0);
+                    if (c == filter.charAt(j)) {
+                        j++;
+                    } else if (c != ' ') {
+                        break;
+                    }
+                    i++;
+                }
+
+                if (j == filterLength) {
+                    start = keys.get(s).position;
+                    end = (i == keySize) ? name.length() : keys.get(i).position;
+                    break;
+                }
+
+                i = s + 1;
+            }
+
+            if (start != -1 && end != -1) {
+                SpannableString result = new SpannableString(name);
+                result.setSpan(mTextStyleSpan, start, end, 0 /* flags */);
+                return result;
+            }
+        }
+        return name;
+    }
+
+    public CharSequence applyNumberFilter(CharSequence number, String filter) {
+        int index = FormatUtils.indexOfWord(number, filter);
+        if (index != -1) {
+            SpannableString result = new SpannableString(number);
+            result.setSpan(mTextStyleSpan, index, index + filter.length(), 0 /* flags */);
+            return result;
+        } else {
+            return number;
         }
     }
 }

@@ -29,8 +29,11 @@ import android.provider.ContactsContract.ContactCounts;
 import android.provider.ContactsContract.Contacts;
 import android.provider.ContactsContract.Data;
 import android.provider.ContactsContract.Directory;
+import android.telephony.PhoneNumberUtils;
+import android.text.TextUtils;
 import android.util.Log;
 import android.view.View;
+import android.view.View.OnClickListener;
 import android.view.ViewGroup;
 
 import com.android.contacts.common.GeoUtil;
@@ -39,6 +42,7 @@ import com.android.contacts.common.ContactPhotoManager.DefaultImageRequest;
 import com.android.contacts.common.extensions.ExtendedPhoneDirectoriesManager;
 import com.android.contacts.common.extensions.ExtensionsFactory;
 import com.android.contacts.common.util.Constants;
+import com.android.contacts.common.util.SimUtils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -102,6 +106,10 @@ public class PhoneNumberListAdapter extends ContactEntryListAdapter {
     private final CharSequence mUnknownNameText;
 
     private ContactListItemView.PhotoPosition mPhotoPosition;
+    private boolean mEnablePrimary2Action = false;
+    private OnClickListener mPrimary2Listener;
+
+    private boolean mIsSmartDialingList = false;
 
     private boolean mUseCallableUri;
 
@@ -143,6 +151,9 @@ public class PhoneNumberListAdapter extends ContactEntryListAdapter {
                     String.valueOf(getDirectoryResultLimit(directory)));
             loader.setUri(builder.build());
             loader.setProjection(PhoneQuery.PROJECTION_PRIMARY);
+            if (mIsSmartDialingList) {
+                builder.appendQueryParameter("smart_dialing", "true");
+            }
         } else {
             final boolean isRemoteDirectoryQuery = isRemoteDirectory(directoryId);
             final Builder builder;
@@ -250,6 +261,10 @@ public class PhoneNumberListAdapter extends ContactEntryListAdapter {
         final Cursor item = (Cursor)getItem(position);
         return item != null ? item.getString(PhoneQuery.PHONE_NUMBER) : null;
     }
+	// Below is function used in JB, is it necessary to port over to KK?
+    public String getContactPhoneNumber(int position) {
+        return ((Cursor) getItem(position)).getString(PhoneQuery.PHONE_NUMBER);
+    }
 
     /**
      * Builds a {@link Data#CONTENT_URI} for the given cursor position.
@@ -279,11 +294,13 @@ public class PhoneNumberListAdapter extends ContactEntryListAdapter {
         view.setUnknownNameText(mUnknownNameText);
         view.setQuickContactEnabled(isQuickContactEnabled());
         view.setPhotoPosition(mPhotoPosition);
+        view.setOnCallButtonClickListener(mPrimary2Listener);
         return view;
     }
 
     protected void setHighlight(ContactListItemView view, Cursor cursor) {
         view.setHighlightedPrefix(isSearchMode() ? getUpperCaseQueryString() : null);
+        view.setDataViewHighlightEnabled(mIsSmartDialingList);
     }
 
     // Override default, which would return number of phone numbers, so we
@@ -339,6 +356,22 @@ public class PhoneNumberListAdapter extends ContactEntryListAdapter {
             }
         }
         cursor.moveToPosition(position);
+        String phoneNumber = cursor.getString(PhoneQuery.PHONE_NUMBER);
+        if (!PhoneNumberUtils.isUriNumber(phoneNumber) && mEnablePrimary2Action) {
+            view.showCallButton(0, position);
+            if (SimUtils.isSim1Ready(getContext())) {
+                view.setAlternativeCallButtonEnabled(true);
+            } else {
+                view.setAlternativeCallButtonEnabled(false);
+            }
+            if (SimUtils.isSim2Ready(getContext())) {
+                view.setCallButtonEnabled(true);
+            } else {
+                view.setCallButtonEnabled(false);
+            }
+        } else {
+            view.hideCallButton();
+        }
 
         bindSectionHeaderAndDivider(view, position);
         if (isFirstEntry) {
@@ -521,5 +554,17 @@ public class PhoneNumberListAdapter extends ContactEntryListAdapter {
                         String.valueOf(directoryId))
                 .encodedFragment(cursor.getString(lookUpKeyColumn))
                 .build();
+    }
+
+    public void setEnablePrimary2Action(boolean enable) {
+        mEnablePrimary2Action = enable;
+    }
+
+    public void setPrimary2Listener(OnClickListener listener) {
+        mPrimary2Listener = listener;
+    }
+
+    public void setIsSmartDialingList(boolean value) {
+        mIsSmartDialingList = value;
     }
 }

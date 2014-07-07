@@ -33,6 +33,7 @@ public class ContactDisplayUtils {
 
     public static final int INTERACTION_CALL = 1;
     public static final int INTERACTION_SMS = 2;
+    public static final int INTERACTION_CALL2 = 3;
 
     /**
      * Checks if the given data type is a custom type.

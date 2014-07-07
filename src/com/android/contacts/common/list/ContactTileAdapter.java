@@ -28,6 +28,7 @@ import android.view.ViewGroup;
 import android.widget.BaseAdapter;
 import android.widget.FrameLayout;
 
+import com.android.contacts.common.ContactsUtils;
 import com.android.contacts.common.ContactPhotoManager;
 import com.android.contacts.common.ContactPresenceIconUtil;
 import com.android.contacts.common.ContactStatusUtil;
@@ -74,6 +75,7 @@ public class ContactTileAdapter extends BaseAdapter {
     private int mPhoneNumberTypeIndex;
     private int mPhoneNumberLabelIndex;
 
+    private boolean mEnablePrimary2Action = false;
     private boolean mIsQuickContactEnabled = false;
     private final int mPaddingInPixels;
 
@@ -120,6 +122,7 @@ public class ContactTileAdapter extends BaseAdapter {
         mContext = context;
         mResources = context.getResources();
         mColumnCount = (displayType == DisplayType.FREQUENT_ONLY ? 1 : numCols);
+        mEnablePrimary2Action = displayType == DisplayType.STREQUENT_PHONE_ONLY;
         mDisplayType = displayType;
         mNumFrequents = 0;
 
@@ -139,6 +142,7 @@ public class ContactTileAdapter extends BaseAdapter {
     }
 
     public void setDisplayType(DisplayType displayType) {
+        mEnablePrimary2Action = displayType == DisplayType.STREQUENT_PHONE_ONLY;
         mDisplayType = displayType;
     }
 
@@ -441,9 +445,14 @@ public class ContactTileAdapter extends BaseAdapter {
                         R.layout.contact_tile_starred_quick_contact : R.layout.contact_tile_starred;
             case ViewTypes.FREQUENT:
                 return mDisplayType == DisplayType.STREQUENT_PHONE_ONLY ?
-                        R.layout.contact_tile_frequent_phone : R.layout.contact_tile_frequent;
+                        ContactsUtils.isDualSimSupported() ?
+                                R.layout.contact_tile_frequent_phone_ds :
+                                R.layout.contact_tile_frequent_phone :
+                        R.layout.contact_tile_frequent;
             case ViewTypes.STARRED_PHONE:
-                return R.layout.contact_tile_phone_starred;
+                return ContactsUtils.isDualSimSupported() ?
+                        R.layout.contact_tile_phone_starred_ds :
+                        R.layout.contact_tile_phone_starred;
             default:
                 throw new IllegalArgumentException("Unrecognized viewType " + viewType);
         }
@@ -552,6 +561,7 @@ public class ContactTileAdapter extends BaseAdapter {
             } else {
                 contactTile = (ContactTileView) getChildAt(childIndex);
             }
+            contactTile.setEnablePrimary2Action(mEnablePrimary2Action);
             contactTile.loadFromContact(entry);
 
             switch (mItemViewType) {

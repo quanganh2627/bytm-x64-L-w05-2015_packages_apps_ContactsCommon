@@ -20,9 +20,11 @@ import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.view.View;
 
+import com.android.contacts.common.ContactsUtils;
 import com.android.contacts.common.MoreContactUtils;
+import com.android.contacts.common.util.SimUtils;
 import com.android.contacts.common.util.ViewUtil;
-
+import android.telephony.PhoneNumberUtils;
 /**
  * A dark version of the {@link com.android.contacts.common.list.ContactTileView} that is used in Dialtacts
  * for frequently called contacts. Slightly different behavior from superclass...
@@ -31,6 +33,7 @@ import com.android.contacts.common.util.ViewUtil;
  */
 public class ContactTilePhoneFrequentView extends ContactTileView {
     private String mPhoneNumberString;
+    private OnClickListener mOnClickListener;
 
     public ContactTilePhoneFrequentView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -57,6 +60,24 @@ public class ContactTilePhoneFrequentView extends ContactTileView {
     }
 
     @Override
+    protected void updateActionButtonsState(String phoneNumber) {
+        super.updateActionButtonsState(phoneNumber);
+        if (ContactsUtils.isDualSimSupported()) {
+            if (PhoneNumberUtils.isUriNumber(phoneNumber)
+                    || SimUtils.isSim1Ready(getContext())) {
+                if (mOnClickListener == null) {
+                    mOnClickListener = createClickListener();
+                }
+                setOnClickListener(mOnClickListener);
+                mPrimary1Button.setEnabled(true);
+            } else {
+                setOnClickListener(null);
+                mPrimary1Button.setEnabled(false);
+            }
+        }
+    }
+
+    @Override
     protected OnClickListener createClickListener() {
         return new OnClickListener() {
             @Override
@@ -73,6 +94,22 @@ public class ContactTilePhoneFrequentView extends ContactTileView {
                     // at (i.e. the one displayed in the UI), regardless of
                     // whether that's their default number.
                     mListener.onCallNumberDirectly(mPhoneNumberString);
+                }
+            }
+        };
+    }
+
+    @Override
+    protected OnClickListener createClickListener2() {
+        return new OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (mListener == null) return;
+                if (TextUtils.isEmpty(mPhoneNumberString)) {
+                    mListener.onContactSelected2(getLookupUri(), MoreContactUtils.getTargetRectFromView(
+                            mContext, ContactTilePhoneFrequentView.this));
+                } else {
+                    mListener.onCallNumberDirectly2(mPhoneNumberString);
                 }
             }
         };

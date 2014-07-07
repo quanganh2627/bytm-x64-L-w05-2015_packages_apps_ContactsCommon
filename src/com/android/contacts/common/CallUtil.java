@@ -22,6 +22,10 @@ import android.net.Uri;
 import android.telephony.PhoneNumberUtils;
 
 import com.android.phone.common.PhoneConstants;
+import com.android.contacts.common.util.Constants;
+import com.android.contacts.common.util.DualSimConstants;
+import android.text.TextUtils;
+
 
 /**
  * Utilities related to calls.
@@ -78,6 +82,32 @@ public class CallUtil {
         intent.setComponent(CALL_INTENT_DESTINATION);
 
         return intent;
+    }
+
+    public static Intent getDualSimCallIntent(String number, int simIndex) {
+        return getDualSimCallIntent(number, simIndex, null);
+    }
+
+    public static Intent getDualSimCallIntent(String number, int simIndex, String callOrigin) {
+        Uri uri = Uri.fromParts(CallUtil.SCHEME_TEL, number, null);
+        return getDualSimCallIntent(uri, simIndex, callOrigin);
+    }
+
+    public static Intent getDualSimCallIntent(Uri uri, int simIndex, String callOrigin) {
+        final Intent intent = new Intent(DualSimConstants.ACTION_DUAL_SIM_CALL, uri);
+        intent.putExtra(DualSimConstants.EXTRA_DSDS_CALL_POLICY, getSlotExtra(simIndex));
+        if (!TextUtils.isEmpty(callOrigin)) {
+            intent.putExtra(PhoneConstants.EXTRA_CALL_ORIGIN, callOrigin);
+        }
+        return intent;
+    }
+
+    public static int getSlotExtra(int simIndex) {
+        if (simIndex == DualSimConstants.DSDS_SLOT_2_ID) {
+            return DualSimConstants.EXTRA_DCALL_SLOT_2;
+        } else {
+            return DualSimConstants.EXTRA_DCALL_SLOT_1;
+        }
     }
 
     /**

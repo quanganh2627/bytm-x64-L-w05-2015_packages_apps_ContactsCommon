@@ -29,6 +29,9 @@ import java.util.Arrays;
  */
 public class FormatUtils {
 
+    private static final char LEFT_TO_RIGHT_EMBEDDING = '\u202A';  // in jb
+    private static final char POP_DIRECTIONAL_FORMATTING = '\u202C'; // in jb
+
     /**
      * Finds the earliest point in buffer1 at which the first part of buffer2 matches.  For example,
      * overlapPoint("abcd", "cdef") == 2.
@@ -180,5 +183,61 @@ public class FormatUtils {
 
         return -1;
     }
+    //refdsds
+    public static int indexOfWord(CharSequence text, String filter) {
+        if (filter == null || text == null) {
+            return -1;
+        }
 
+        int textLength = text.length();
+        int prefixLength = filter.length();
+
+        if (prefixLength == 0 || textLength < prefixLength) {
+            return -1;
+        }
+
+        int start = 0;
+        int i = 0;
+        while (i < textLength) {
+            // Skip non-word characters
+            while (i < textLength && !Character.isLetterOrDigit(text.charAt(i))) {
+                i++;
+            }
+
+            // Seek first filter character
+            while (i < textLength && Character.toUpperCase(text.charAt(i)) != filter.charAt(0)) {
+                i++;
+            }
+
+            if (i + prefixLength > textLength) {
+                return -1;
+            }
+
+            start = i;
+
+            // Compare the prefixes
+            int j;
+            for (j = 0; j < prefixLength; j++) {
+                if (Character.toUpperCase(text.charAt(i + j)) != filter.charAt(j)) {
+                    break;
+                }
+            }
+            if (j == prefixLength) {
+                return i;
+            }
+
+            i = start + 1;
+        }
+
+        return -1;
+    }
+
+    /** Returns the given text, forced to be left-to-right. */
+    public static CharSequence forceLeftToRight(CharSequence text) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(LEFT_TO_RIGHT_EMBEDDING);
+        sb.append(text);
+        sb.append(POP_DIRECTIONAL_FORMATTING);
+        return sb.toString();
+    }
 }

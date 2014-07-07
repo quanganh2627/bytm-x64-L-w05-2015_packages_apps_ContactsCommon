@@ -18,9 +18,11 @@ package com.android.contacts.common.list;
 import android.content.CursorLoader;
 import android.content.Intent;
 import android.content.Loader;
+import android.content.res.Resources;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
+import android.telephony.PhoneNumberUtils;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -28,10 +30,16 @@ import android.view.MenuItem;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.ViewGroup;
+import android.widget.FrameLayout;
+import android.widget.ListView;
 
 import com.android.contacts.common.R;
 import com.android.contacts.common.list.ShortcutIntentBuilder.OnShortcutIntentCreatedListener;
 import com.android.contacts.common.util.AccountFilterUtil;
+
+import com.android.contacts.common.ContactsUtils;
+import com.android.contacts.common.util.DualSimConstants;
+import com.android.contacts.common.util.SimUtils;
 
 /**
  * Fragment containing a phone number list for picking.
@@ -77,6 +85,29 @@ public class PhoneNumberPickerFragment extends ContactEntryListFragment<ContactE
     }
     private OnClickListener mFilterHeaderClickListener = new FilterHeaderClickListener();
 
+    private class PhoneNumberListAdapterListener implements OnClickListener {
+        @Override
+        public void onClick(View view) {
+            ListView listView = getListView();
+            int position = listView.getPositionForView(view) - listView.getHeaderViewsCount();
+            if (mListener != null) {
+                PhoneNumberListAdapter adapter = (PhoneNumberListAdapter) getAdapter();
+                final Uri phoneUri = adapter.getDataUri(position);
+                if (phoneUri != null) {
+                    if (mShortcutAction == null) {
+                        mListener.onPickPhoneNumberAction2(phoneUri);
+                    } else {
+                        ShortcutIntentBuilder builder = new ShortcutIntentBuilder(getActivity(),
+                                PhoneNumberPickerFragment.this);
+                        builder.createPhoneNumberShortcutIntent(phoneUri, mShortcutAction,
+                                DualSimConstants.DSDS_SLOT_2_ID);
+                    }
+                }
+            }
+        }
+    }
+    private OnClickListener mPhoneNumberListAdapterListener = new PhoneNumberListAdapterListener();
+
     public PhoneNumberPickerFragment() {
         setQuickContactEnabled(false);
         setPhotoLoaderEnabled(true);
@@ -113,6 +144,27 @@ public class PhoneNumberPickerFragment extends ContactEntryListFragment<ContactE
         updateFilterHeaderView();
 
         setVisibleScrollbarEnabled(getVisibleScrollbarEnabled());
+        //if (getVisibleScrollbarEnabled() && ContactsUtils.isDualSimSupported()) {
+        if (!isLegacyCompatibilityMode() && ContactsUtils.isDualSimSupported()) {
+            final Resources res = getActivity().getResources();
+            int margin = res.getDimensionPixelOffset(R.dimen.detail_item_vertical_margin);
+            int padding = res.getDimensionPixelOffset(R.dimen.detail_item_vertical_margin) * 3;
+            View listView = getListView();
+            listView.setPadding(listView.getPaddingLeft(), listView.getPaddingTop(),
+                    padding, listView.getPaddingBottom());
+            FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT);
+            params.setMargins(margin, 0, -margin, 0);
+            listView.setLayoutParams(params);
+        }
+    }
+
+    public void setIsSmartDialingList(boolean value) {  // ref
+        if (!isLegacyCompatibilityMode()) {
+            PhoneNumberListAdapter adapter = (PhoneNumberListAdapter) getAdapter();
+            adapter.setIsSmartDialingList(value);
+        }
     }
 
     protected boolean getVisibleScrollbarEnabled() {
@@ -182,6 +234,10 @@ public class PhoneNumberPickerFragment extends ContactEntryListFragment<ContactE
         this.mShortcutAction = shortcutAction;
     }
 
+    private boolean isCreateShortcutSmsAction() {
+        return TextUtils.equals(mShortcutAction, Intent.ACTION_SENDTO);
+    }
+
     @Override
     protected void onItemClick(int position, long id) {
         final Uri phoneUri = getPhoneUri(position);
@@ -241,6 +297,10 @@ public class PhoneNumberPickerFragment extends ContactEntryListFragment<ContactE
         PhoneNumberListAdapter adapter = new PhoneNumberListAdapter(getActivity());
         adapter.setDisplayPhotos(true);
         adapter.setUseCallableUri(mUseCallableUri);
+        if (ContactsUtils.isDualSimSupported() && !isCreateShortcutSmsAction()) {
+            adapter.setPrimary2Listener(mPhoneNumberListAdapterListener);
+            adapter.setEnablePrimary2Action(true);
+        }
         return adapter;
     }
 
@@ -270,8 +330,16 @@ public class PhoneNumberPickerFragment extends ContactEntryListFragment<ContactE
     }
 
     public void pickPhoneNumber(Uri uri) {
+        pickPhoneNumber(uri, null);
+    }
+
+    public void pickPhoneNumber(Uri uri, String phoneNumber) {
         if (mShortcutAction == null) {
-            mListener.onPickPhoneNumberAction(uri);
+            if (isLegacyCompatibilityMode() || !ContactsUtils.isDualSimSupported()
+                    || PhoneNumberUtils.isUriNumber(phoneNumber)
+                    || SimUtils.isSim1Ready(getContext())) {
+                mListener.onPickPhoneNumberAction(uri);
+            }
         } else {
             startPhoneNumberShortcutIntent(uri);
         }
@@ -279,7 +347,8 @@ public class PhoneNumberPickerFragment extends ContactEntryListFragment<ContactE
 
     protected void startPhoneNumberShortcutIntent(Uri uri) {
         ShortcutIntentBuilder builder = new ShortcutIntentBuilder(getActivity(), this);
-        builder.createPhoneNumberShortcutIntent(uri, mShortcutAction);
+        builder.createPhoneNumberShortcutIntent(uri, mShortcutAction,
+            DualSimConstants.DSDS_SLOT_1_ID);
     }
 
     public void onShortcutIntentCreated(Uri uri, Intent shortcutIntent) {

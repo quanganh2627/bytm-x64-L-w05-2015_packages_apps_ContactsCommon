@@ -19,15 +19,20 @@ package com.android.contacts.common;
 import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
+import android.os.SystemProperties;
 import android.provider.ContactsContract.CommonDataKinds.Im;
 import android.provider.ContactsContract.DisplayPhoto;
 import android.telephony.PhoneNumberUtils;
+import android.telephony.TelephonyManager;
 import android.text.TextUtils;
-
+import android.net.Uri;
+import com.android.contacts.common.util.Constants;
 import com.android.contacts.common.model.account.AccountWithDataSet;
 import com.android.contacts.common.test.NeededForTesting;
 import com.android.contacts.common.model.AccountTypeManager;
-
+import com.android.contacts.common.util.DualSimConstants;
+import com.android.internal.telephony.TelephonyConstants;
+import com.android.phone.common.PhoneConstants;
 import java.util.List;
 
 public class ContactsUtils {
@@ -119,7 +124,63 @@ public class ContactsUtils {
         final List<AccountWithDataSet> accounts =
                 AccountTypeManager.getInstance(context).getGroupWritableAccounts();
         return !accounts.isEmpty();
+	}
+//from PEKALL ref
+    public static Intent getDualSimCallIntent(String number, int simIndex) {
+        return getDualSimCallIntent(number, simIndex, null);
     }
+
+    public static Intent getDualSimCallIntent(String number, int simIndex, String callOrigin) {
+        Uri uri = Uri.fromParts(CallUtil.SCHEME_TEL, number, null);
+        return getDualSimCallIntent(uri, simIndex, callOrigin);
+    }
+
+    public static Intent getDualSimCallIntent(Uri uri, int simIndex, String callOrigin) {
+        final Intent intent = new Intent(DualSimConstants.ACTION_DUAL_SIM_CALL, uri);
+        intent.putExtra(DualSimConstants.EXTRA_DSDS_CALL_POLICY, getSlotExtra(simIndex));
+        if (!TextUtils.isEmpty(callOrigin)) {
+            intent.putExtra(PhoneConstants.EXTRA_CALL_ORIGIN, callOrigin);
+        }
+        return intent;
+    }
+
+    public static int getSlotExtra(int simIndex) {
+        if (simIndex == DualSimConstants.DSDS_SLOT_2_ID) {
+            return DualSimConstants.EXTRA_DCALL_SLOT_2;
+        } else {
+            return DualSimConstants.EXTRA_DCALL_SLOT_1;
+        }
+    }
+
+    /**
+     * Return an Intent for launching voicemail screen.
+     */
+    public static Intent getVoicemailIntent() {
+        return getVoicemailIntent(DualSimConstants.DSDS_SLOT_1_ID);
+    }
+
+    public static Intent getVoicemailIntent(int simIndex) {
+        final Intent intent;
+        if (ContactsUtils.isDualSimSupported()) {
+            intent = new Intent(DualSimConstants.ACTION_DUAL_SIM_CALL);
+            final Uri uri;
+            if (simIndex == DualSimConstants.DSDS_SLOT_2_ID) {
+                uri = Uri.fromParts("voicemail", "", null);
+                intent.putExtra(DualSimConstants.EXTRA_DSDS_CALL_POLICY,
+                        DualSimConstants.EXTRA_DCALL_SLOT_2);
+            } else {
+                uri = Uri.fromParts("voicemail", "phone2", null);
+                intent.putExtra(DualSimConstants.EXTRA_DSDS_CALL_POLICY,
+                        DualSimConstants.EXTRA_DCALL_SLOT_1);
+            }
+            intent.setData(uri);
+        } else {
+            intent = new Intent(Intent.ACTION_CALL_PRIVILEGED,
+                    Uri.fromParts("voicemail", "", null));
+        }
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        return intent;
+    }    
 
     /**
      * Returns the size (width and height) of thumbnail pictures as configured in the provider. This
@@ -141,4 +202,30 @@ public class ContactsUtils {
         return sThumbnailSize;
     }
 
+    public static TelephonyManager getTelephonyManager2(Context context) {
+        return TelephonyManager.get2ndTm();
+    }
+
+    private static final int TEST_LAYOUT_NOT_SET = 0;
+    private static final int TEST_LAYOUT_1S1S = 1;
+    private static final int TEST_LAYOUT_DSDS = 2;
+
+    public static boolean isDualSimSupported() {
+        int layoutConfig = SystemProperties.getInt("contacts.layout_config",
+                TEST_LAYOUT_NOT_SET);
+
+        boolean val;
+        switch (layoutConfig) {
+            case TEST_LAYOUT_1S1S:
+               val = false;
+               break;
+            case TEST_LAYOUT_DSDS:
+               val = true;
+               break;
+            default:
+               val = TelephonyConstants.IS_DSDS;
+               break;
+        }
+        return val;
+    }
 }

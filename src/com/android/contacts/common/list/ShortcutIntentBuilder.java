@@ -40,10 +40,13 @@ import android.text.TextPaint;
 import android.text.TextUtils;
 import android.text.TextUtils.TruncateAt;
 
+import com.android.contacts.common.ContactsUtils;
 import com.android.contacts.common.CallUtil;
 import com.android.contacts.common.ContactPhotoManager;
 import com.android.contacts.common.ContactPhotoManager.DefaultImageRequest;
 import com.android.contacts.common.R;
+import com.android.contacts.common.util.Constants;
+import com.android.contacts.common.util.DualSimConstants;
 
 /**
  * Constructs shortcut intents.
@@ -134,8 +137,8 @@ public class ShortcutIntentBuilder {
         new ContactLoadingAsyncTask(contactUri).execute();
     }
 
-    public void createPhoneNumberShortcutIntent(Uri dataUri, String shortcutAction) {
-        new PhoneNumberLoadingAsyncTask(dataUri, shortcutAction).execute();
+    public void createPhoneNumberShortcutIntent(Uri dataUri, String shortcutAction, int simIndex) {
+        new PhoneNumberLoadingAsyncTask(dataUri, shortcutAction, simIndex).execute();
     }
 
     /**
@@ -212,13 +215,15 @@ public class ShortcutIntentBuilder {
 
     private final class PhoneNumberLoadingAsyncTask extends LoadingAsyncTask {
         private final String mShortcutAction;
+        private final int mSimIndex;
         private String mPhoneNumber;
         private int mPhoneType;
         private String mPhoneLabel;
 
-        public PhoneNumberLoadingAsyncTask(Uri uri, String shortcutAction) {
+        public PhoneNumberLoadingAsyncTask(Uri uri, String shortcutAction, int simIndex) {
             super(uri);
             mShortcutAction = shortcutAction;
+            mSimIndex = simIndex;
         }
 
         @Override
@@ -243,8 +248,13 @@ public class ShortcutIntentBuilder {
 
         @Override
         protected void onPostExecute(Void result) {
+//4.4.4 new
             createPhoneNumberShortcutIntent(mUri, mDisplayName, mLookupKey, mBitmapData,
-                    mPhoneNumber, mPhoneType, mPhoneLabel, mShortcutAction);
+                    mPhoneNumber, mPhoneType, mPhoneLabel, mShortcutAction, mSimIndex);
+
+//            createPhoneNumberShortcutIntent(mUri, mDisplayName, mBitmapData, mPhoneNumber,
+//                    mPhoneType, mPhoneLabel, mShortcutAction, mSimIndex);
+
         }
     }
 
@@ -294,18 +304,39 @@ public class ShortcutIntentBuilder {
         mListener.onShortcutIntentCreated(contactUri, intent);
     }
 
+//4.4.4 new
     private void createPhoneNumberShortcutIntent(Uri uri, String displayName, String lookupKey,
             byte[] bitmapData, String phoneNumber, int phoneType, String phoneLabel,
-            String shortcutAction) {
+            String shortcutAction, int simIndex) {
         Drawable drawable = getPhotoDrawable(bitmapData, displayName, lookupKey);
 
+//    private void createPhoneNumberShortcutIntent(Uri uri, String displayName, byte[] bitmapData,
+//            String phoneNumber, int phoneType, String phoneLabel, String shortcutAction,
+//            int simIndex) {
+//        Bitmap bitmap = getPhotoBitmap(bitmapData);
         Bitmap bitmap;
         Uri phoneUri;
+        boolean addSlotExtra = false;
         if (Intent.ACTION_CALL.equals(shortcutAction)) {
             // Make the URI a direct tel: URI so that it will always continue to work
             phoneUri = Uri.fromParts(CallUtil.SCHEME_TEL, phoneNumber, null);
-            bitmap = generatePhoneNumberIcon(drawable, phoneType, phoneLabel,
-                    R.drawable.badge_action_call);
+//
+//            bitmap = generatePhoneNumberIcon(drawable, phoneType, phoneLabel,
+//                    R.drawable.badge_action_call);
+
+            int actionResId = 0;
+            if (ContactsUtils.isDualSimSupported()) {
+                shortcutAction = DualSimConstants.ACTION_DUAL_SIM_CALL;
+                addSlotExtra = true;
+                if (simIndex == DualSimConstants.DSDS_SLOT_2_ID) {
+                    actionResId = R.drawable.badge_action_call_2;
+                } else {
+                    actionResId = R.drawable.badge_action_call_1;
+                }
+            } else {
+                actionResId = R.drawable.badge_action_call;
+            }
+            bitmap = generatePhoneNumberIcon(drawable, phoneType, phoneLabel, actionResId);
         } else {
             phoneUri = Uri.fromParts(CallUtil.SCHEME_SMSTO, phoneNumber, null);
             bitmap = generatePhoneNumberIcon(drawable, phoneType, phoneLabel,
@@ -314,6 +345,10 @@ public class ShortcutIntentBuilder {
 
         Intent shortcutIntent = new Intent(shortcutAction, phoneUri);
         shortcutIntent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        if (addSlotExtra) {
+            shortcutIntent.putExtra(DualSimConstants.EXTRA_DSDS_CALL_POLICY,
+                    ContactsUtils.getSlotExtra(simIndex));
+        }
 
         Intent intent = new Intent();
         intent.putExtra(Intent.EXTRA_SHORTCUT_ICON, bitmap);
